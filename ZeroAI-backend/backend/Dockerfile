@@ -3,14 +3,21 @@ FROM python:3.10-slim
 WORKDIR /app
 
 # 配置使用阿里云 Debian 镜像源（解决国内网络访问问题）
-# 兼容 Debian 12 (bookworm) 和 Debian 13 (trixie)
+# 自动检测 Debian 版本并配置对应的镜像源
 RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        # Debian 13+ 使用 debian.sources 格式
         sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources && \
         sed -i 's|security.debian.org|mirrors.aliyun.com/debian-security|g' /etc/apt/sources.list.d/debian.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+        # Debian 12 及以下使用 sources.list 格式
+        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list && \
+        sed -i 's|security.debian.org|mirrors.aliyun.com/debian-security|g' /etc/apt/sources.list; \
     else \
-        echo "deb http://mirrors.aliyun.com/debian/ bookworm main" > /etc/apt/sources.list && \
-        echo "deb http://mirrors.aliyun.com/debian-security/ bookworm-security main" >> /etc/apt/sources.list && \
-        echo "deb http://mirrors.aliyun.com/debian/ bookworm-updates main" >> /etc/apt/sources.list; \
+        # 如果都不存在，创建新的 sources.list（默认使用 trixie）
+        DEBIAN_CODENAME=$(lsb_release -cs 2>/dev/null || echo "trixie") && \
+        echo "deb http://mirrors.aliyun.com/debian/ ${DEBIAN_CODENAME} main" > /etc/apt/sources.list && \
+        echo "deb http://mirrors.aliyun.com/debian-security/ ${DEBIAN_CODENAME}-security main" >> /etc/apt/sources.list && \
+        echo "deb http://mirrors.aliyun.com/debian/ ${DEBIAN_CODENAME}-updates main" >> /etc/apt/sources.list; \
     fi
 
 # 安装系统依赖（优化：分步安装，减少内存占用）
