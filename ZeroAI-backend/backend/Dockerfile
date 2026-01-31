@@ -2,10 +2,15 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# 安装系统依赖
-RUN apt-get update && apt-get install -y \
+# 安装系统依赖（优化：分步安装，减少内存占用）
+# 先更新包列表
+RUN apt-get update
+
+# 安装 gcc 及其最小依赖（避免安装完整 build-essential）
+RUN apt-get install -y --no-install-recommends \
     gcc \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
 
 # 复制依赖文件
 COPY requirements.txt .
