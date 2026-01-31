@@ -55,4 +55,9 @@ rdflib>=7.1.4,<7.2.0
 transformers>=4.30.0
 aiosqlite>=0.19.0  # Cognee 需要此模块用于 SQLite 数据库操作
 aiohttp>=3.9.0  # Cognee 和 litellm 需要此模块用于异步 HTTP 请求（虽然代码中禁用，但作为依赖仍需要）
+# 图像处理（OCR 和图片处理）
+Pillow>=10.0.0  # PIL 图像处理库（用于图片处理和 OCR）
+pytesseract>=0.3.10  # Tesseract OCR 绑定（可选，用于图片文字识别）
+# 密码加密（passlib 的依赖，但代码中直接使用）
+bcrypt>=4.0.0  # bcrypt 密码加密（passlib[bcrypt] 的依赖，但代码中直接使用 bcrypt）
 # 注意：Milvus适配器可能需要单独安装或通过其他方式配置
