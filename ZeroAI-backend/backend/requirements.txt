@@ -53,4 +53,6 @@ networkx>=3.4.2,<4
 pypdf>=4.1.0,<7.0.0
 rdflib>=7.1.4,<7.2.0
 transformers>=4.30.0
+aiosqlite>=0.19.0  # Cognee 需要此模块用于 SQLite 数据库操作
+aiohttp>=3.9.0  # Cognee 和 litellm 需要此模块用于异步 HTTP 请求（虽然代码中禁用，但作为依赖仍需要）
 # 注意：Milvus适配器可能需要单独安装或通过其他方式配置
