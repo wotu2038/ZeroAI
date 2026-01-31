@@ -1,0 +1,195 @@
+version: '3.8'
+
+services:
+  neo4j:
+    image: neo4j:5.26.0
+    container_name: zero-ai-neo4j
+    restart: unless-stopped  # 自动重启策略：除非手动停止，否则总是重启
+    ports:
+      - "7474:7474"  # HTTP
+      - "7687:7687"  # Bolt
+    # 不直接使用 env_file，避免传递 NEO4J_URI 等应用层变量给 Neo4j 容器
+    # 只传递 Neo4j 容器需要的环境变量
+    environment:
+      # Neo4j认证：格式为 username/password
+      # 从 .env 读取密码，通过环境变量传递
+      - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-your_neo4j_password}
+      - NEO4J_PLUGINS=["apoc", "graph-data-science"]
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*,gds.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*,gds.*
+      # 内存配置（Neo4j 5.26+，使用新配置项避免deprecated警告）
+      # 增加内存以提升性能，支持更复杂的图算法和查询
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=2G
+      # 页面缓存配置（增加以提升查询性能）
+      - NEO4J_server_memory_pagecache_size=1G
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+    healthcheck:
+      # 注意：healthcheck中的密码需要与NEO4J_AUTH中的密码一致
+      # 这里使用 docker compose 在解析阶段替换的变量（来自 .env 或 shell 环境）
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD:-your_neo4j_password}", "RETURN 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
+  # 一次性初始化：补齐知识图谱框架所需的 Neo4j 索引
+  # 说明：Neo4j 数据卷重建后索引会丢失，导致任务调用 db.index.fulltext.queryNodes 失败
+  # 这里用独立 init 容器保证 backend / celery 启动前索引已存在
+  neo4j_init:
+    image: neo4j:5.26.0
+    container_name: zero-ai-neo4j-init
+    depends_on:
+      neo4j:
+        condition: service_healthy
+    # 覆盖镜像默认 entrypoint，避免 Neo4j 将 NEO4J_PASSWORD 当作配置项解析
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "等待 Neo4j Bolt 端口就绪..."
+        i=0
+        until [ $$i -ge 30 ]; do
+          cypher-shell -a bolt://neo4j:7687 -u neo4j -p "$${NEO4J_PASSWORD}" "RETURN 1" && break
+          i=$$((i+1))
+          sleep 2
+        done
+        if [ $$i -ge 30 ]; then
+          echo "neo4j_init: 无法连接到 Neo4j" >&2
+          exit 1
+        fi
+        echo "创建知识图谱所需的 Neo4j 索引..."
+        cypher-shell -a bolt://neo4j:7687 -u neo4j -p "$${NEO4J_PASSWORD}" "
+        CREATE INDEX entity_uuid IF NOT EXISTS FOR (n:Entity) ON (n.uuid);
+        CREATE INDEX entity_group_id IF NOT EXISTS FOR (n:Entity) ON (n.group_id);
+        CREATE INDEX name_entity_index IF NOT EXISTS FOR (n:Entity) ON (n.name);
+        CREATE INDEX created_at_entity_index IF NOT EXISTS FOR (n:Entity) ON (n.created_at);
+        CREATE INDEX episode_uuid IF NOT EXISTS FOR (n:Episodic) ON (n.uuid);
+        CREATE INDEX episode_group_id IF NOT EXISTS FOR (n:Episodic) ON (n.group_id);
+        CREATE INDEX created_at_episodic_index IF NOT EXISTS FOR (n:Episodic) ON (n.created_at);
+        CREATE INDEX valid_at_episodic_index IF NOT EXISTS FOR (n:Episodic) ON (n.valid_at);
+        CREATE INDEX community_uuid IF NOT EXISTS FOR (n:Community) ON (n.uuid);
+        CREATE INDEX community_group_id IF NOT EXISTS FOR (n:Community) ON (n.group_id);
+        CREATE INDEX relation_uuid IF NOT EXISTS FOR ()-[e:RELATES_TO]-() ON (e.uuid);
+        CREATE INDEX relation_group_id IF NOT EXISTS FOR ()-[e:RELATES_TO]-() ON (e.group_id);
+        CREATE INDEX name_edge_index IF NOT EXISTS FOR ()-[e:RELATES_TO]-() ON (e.name);
+        CREATE INDEX created_at_edge_index IF NOT EXISTS FOR ()-[e:RELATES_TO]-() ON (e.created_at);
+        CREATE INDEX expired_at_edge_index IF NOT EXISTS FOR ()-[e:RELATES_TO]-() ON (e.expired_at);
+        CREATE INDEX valid_at_edge_index IF NOT EXISTS FOR ()-[e:RELATES_TO]-() ON (e.valid_at);
+        CREATE INDEX invalid_at_edge_index IF NOT EXISTS FOR ()-[e:RELATES_TO]-() ON (e.invalid_at);
+        CREATE INDEX mention_uuid IF NOT EXISTS FOR ()-[e:MENTIONS]-() ON (e.uuid);
+        CREATE INDEX mention_group_id IF NOT EXISTS FOR ()-[e:MENTIONS]-() ON (e.group_id);
+        CREATE INDEX has_member_uuid IF NOT EXISTS FOR ()-[e:HAS_MEMBER]-() ON (e.uuid);
+        CREATE FULLTEXT INDEX episode_content IF NOT EXISTS FOR (e:Episodic) ON EACH [e.content, e.source, e.source_description, e.group_id];
+        CREATE FULLTEXT INDEX node_name_and_summary IF NOT EXISTS FOR (n:Entity) ON EACH [n.name, n.summary, n.group_id];
+        CREATE FULLTEXT INDEX community_name IF NOT EXISTS FOR (n:Community) ON EACH [n.name, n.group_id];
+        CREATE FULLTEXT INDEX edge_name_and_fact IF NOT EXISTS FOR ()-[e:RELATES_TO]-() ON EACH [e.name, e.fact, e.group_id];
+        "
+        echo "Neo4j 索引创建完成"
+    environment:
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-your_neo4j_password}
+    restart: "no"
+
+  mysql:
+    image: mysql:8.0
+    container_name: zero-ai-mysql
+    ports:
+      - "3306:3306"
+    env_file:
+      - .env
+    environment:
+      # MySQL密码：生产环境请修改为强密码，可通过环境变量 MYSQL_PASSWORD 设置
+      # 如果未设置环境变量，将使用占位符（需要用户手动修改）
+      - MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD:-your_mysql_password}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-zero_ai}
+      - MYSQL_USER=${MYSQL_USER:-zero_ai}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-your_mysql_password}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/init_mysql.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      # 注意：healthcheck中的密码需要与MYSQL_ROOT_PASSWORD一致
+      # 如果使用环境变量，需要确保MYSQL_PASSWORD已设置
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_PASSWORD:-your_mysql_password}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: --default-authentication-plugin=mysql_native_password
+
+  redis:
+    image: redis:7-alpine
+    container_name: zero-ai-redis
+    ports:
+      - "6380:6379"
+    command: redis-server --requirepass ${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    env_file:
+      - .env
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: zero-ai-backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # 容器间通信必需的配置（使用容器名）
+      - NEO4J_URI=bolt://neo4j:7687
+      - MYSQL_HOST=mysql
+      - REDIS_HOST=redis
+      # 其他配置从.env文件读取
+    volumes:
+      - ./backend:/app
+    depends_on:
+      neo4j:
+        condition: service_healthy
+      neo4j_init:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --timeout-keep-alive 300
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: zero-ai-celery-worker
+    env_file:
+      - .env
+    environment:
+      # 容器间通信必需的配置（使用容器名）
+      - NEO4J_URI=bolt://neo4j:7687
+      - MYSQL_HOST=mysql
+      - REDIS_HOST=redis
+      # 其他配置从.env文件读取
+    volumes:
+      - ./backend:/app
+    depends_on:
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+      neo4j_init:
+        condition: service_completed_successfully
+      mysql:
+        condition: service_healthy
+    command: celery -A app.core.celery_app worker --loglevel=info --concurrency=2
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  mysql_data:
+  redis_data:
+

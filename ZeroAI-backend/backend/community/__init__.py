@@ -1,0 +1,1 @@
+# Community adapters package

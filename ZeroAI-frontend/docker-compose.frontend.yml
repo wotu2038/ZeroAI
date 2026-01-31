@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NODE_ENV=production
+        - VITE_API_BASE_URL=/api
+    container_name: zero-ai-frontend
+    ports:
+      - "3008:80"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    networks:
+      - default
+      - backend_network
+    # 注意：如果前后端分离部署，需要配置后端API地址
+    # 方式1（推荐）：通过构建参数配置 VITE_API_BASE_URL
+    # 例如：--build-arg VITE_API_BASE_URL=http://your-backend-host:8000/api
+    # 如果通过 nginx 代理，使用：--build-arg VITE_API_BASE_URL=/api
+    # 
+    # 方式2：修改 nginx.conf 中的 proxy_pass 地址
+    # 例如：proxy_pass http://your-backend-host:8000/api;
+    # 如果后端在同一Docker网络中，可以使用服务名：proxy_pass http://backend:8000/api;
+    # 
+    # 方式3：使用 .env 文件（开发环境）
+    # 在项目根目录创建 .env 文件，设置 VITE_API_BASE_URL
+    # depends_on:
+    #   - backend  # 如果后端在同一docker-compose中，取消注释
+
+networks:
+  backend_network:
+    external: true
+    name: zeroai-backend_default
+
