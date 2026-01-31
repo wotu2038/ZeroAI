@@ -28,9 +28,9 @@ services:
       - neo4j_logs:/logs
     healthcheck:
       # 注意：healthcheck中的密码需要与NEO4J_AUTH中的密码一致
-      # 使用更简单的健康检查，先检查端口是否可访问，再检查数据库连接
       # Neo4j 安装插件需要时间，特别是 graph-data-science 需要从网络下载
-      test: ["CMD-SHELL", "timeout 5 bash -c 'until echo > /dev/tcp/localhost/7687; do sleep 1; done' || cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-your_neo4j_password} 'RETURN 1' || exit 1"]
+      # 增加启动时间和重试次数，确保插件安装完成后再进行健康检查
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "${NEO4J_PASSWORD:-your_neo4j_password}", "RETURN 1"]
       interval: 30s
       timeout: 15s
       retries: 20
