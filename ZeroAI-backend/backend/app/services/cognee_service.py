@@ -99,8 +99,9 @@ def get_cognee():
                     os.environ["EMBEDDING_DIMENSIONS"] = "1024"
                     
                     # 设置 tokenizer（Cognee 需要这个来计算 token 数量）
-                    # 注意：Cognee 会尝试从 HuggingFace 加载 tokenizer，这需要网络访问
-                    # 如果网络不可达，可能会失败。这是 Cognee 的依赖，无法完全避免
+                    # 配置使用 HuggingFace 镜像源或本地缓存
+                    # 方案：设置 HF_ENDPOINT 环境变量指向镜像源
+                    # 或者使用 transformers 的离线模式
                     tokeniser_model = embedding_model
                     if ':' in tokeniser_model:
                         tokeniser_model = tokeniser_model.split(':')[0]
@@ -110,17 +111,24 @@ def get_cognee():
                         os.environ["HUGGINGFACE_TOKENIZER"] = f"BAAI/{tokeniser_model}"
                     else:
                         os.environ["HUGGINGFACE_TOKENIZER"] = tokeniser_model
-                    logger.warning(
-                        f"⚠️ 设置了 HUGGINGFACE_TOKENIZER={os.environ.get('HUGGINGFACE_TOKENIZER')}，"
-                        f"Cognee 需要从 HuggingFace 加载 tokenizer 来计算 token 数量。"
-                        f"如果网络不可达，可能会失败。"
-                    )
+                    
+                    # 配置 HuggingFace 镜像源（解决网络不可达问题）
+                    # 使用国内镜像源：https://hf-mirror.com
+                    # transformers 库会识别这些环境变量
+                    os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+                    # 同时设置 HF_HUB_BASE_URL（某些版本可能需要）
+                    os.environ["HF_HUB_BASE_URL"] = "https://hf-mirror.com"
+                    # 设置缓存目录（可选，用于离线使用）
+                    # os.environ["HF_HOME"] = "/app/.cache/huggingface"
+                    # os.environ["TRANSFORMERS_CACHE"] = "/app/.cache/huggingface/transformers"
                     
                     logger.info(
                         f"Embedding 环境变量已设置: "
                         f"EMBEDDING_PROVIDER={os.environ.get('EMBEDDING_PROVIDER')}, "
-                        f"EMBEDDING_ENDPOINT={embedding_endpoint}"
-                        # 注意：未设置 HUGGINGFACE_TOKENIZER，避免访问 HuggingFace
+                        f"EMBEDDING_ENDPOINT={embedding_endpoint}, "
+                        f"EMBEDDING_DIMENSIONS=1024, "
+                        f"HUGGINGFACE_TOKENIZER={os.environ.get('HUGGINGFACE_TOKENIZER')}, "
+                        f"HF_ENDPOINT={os.environ.get('HF_ENDPOINT')}"
                     )
             
             # ========== 4. 配置向量数据库（Milvus）==========
