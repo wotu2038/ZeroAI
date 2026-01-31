@@ -2,6 +2,17 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
+# 配置使用阿里云 Debian 镜像源（解决国内网络访问问题）
+# 兼容 Debian 12 (bookworm) 和 Debian 13 (trixie)
+RUN if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i 's|deb.debian.org|mirrors.aliyun.com|g' /etc/apt/sources.list.d/debian.sources && \
+        sed -i 's|security.debian.org|mirrors.aliyun.com/debian-security|g' /etc/apt/sources.list.d/debian.sources; \
+    else \
+        echo "deb http://mirrors.aliyun.com/debian/ bookworm main" > /etc/apt/sources.list && \
+        echo "deb http://mirrors.aliyun.com/debian-security/ bookworm-security main" >> /etc/apt/sources.list && \
+        echo "deb http://mirrors.aliyun.com/debian/ bookworm-updates main" >> /etc/apt/sources.list; \
+    fi
+
 # 安装系统依赖（优化：分步安装，减少内存占用）
 # 先更新包列表
 RUN apt-get update
